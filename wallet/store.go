@@ -3,6 +3,7 @@ package wallet
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	homedir "github.com/mitchellh/go-homedir"
 	"io/ioutil"
 	"os"
@@ -23,27 +24,37 @@ type Identity struct {
 
 var wallet *Wallet
 
+func logError(prefix string, err error) {
+	fmt.Printf("%s - %s", prefix, err)
+}
+
 func init() {
-	wallet = &Wallet{}
+	loadWallet()
 }
 
 func (w *Wallet) Save() error {
-	dir, err := homedir.Dir()
+	buf := new(bytes.Buffer)
+	err := json.NewEncoder(buf).Encode(*w)
 	if err != nil {
 		return err
+	}
+	if wPath, err := walletPath(); err != nil {
+		return err
+	} else {
+		return ioutil.WriteFile(wPath, buf.Bytes(), 0600)
+	}
+}
+func walletPath() (string, error) {
+	dir, err := homedir.Dir()
+	if err != nil {
+		return "", err
 	}
 	prefPath := filepath.Join(dir, PrefPath)
 	err = os.MkdirAll(prefPath, 0755)
 	if err != nil {
-		return err
+		return "", err
 	}
-	walletPath := filepath.Join(prefPath, "wallet.json")
-	buf := new(bytes.Buffer)
-	err = json.NewEncoder(buf).Encode(*w)
-	if err != nil {
-		return err
-	}
-	return ioutil.WriteFile(walletPath, buf.Bytes(), 0600)
+	return filepath.Join(prefPath, "wallet.json"), nil
 }
 
 func CurrentWallet() *Wallet {
@@ -55,4 +66,31 @@ func ensureFile(walletPath string) (*os.File, error) {
 		return os.Create(walletPath)
 	}
 	return os.Open(walletPath)
+}
+func loadWallet() {
+	wPath, err := walletPath()
+	if err != nil {
+		logError("unable to get walletPath", err)
+		wallet = &Wallet{}
+		return
+	}
+	_, err = os.Stat(wPath)
+	if os.IsNotExist(err) {
+		logError(fmt.Sprintf("walletPath does not exist %s", wPath), err)
+		wallet = &Wallet{}
+		return
+	}
+	walletBytes, err := ioutil.ReadFile(wPath)
+	if err != nil {
+		logError(fmt.Sprintf("Unable to read file %s", wPath), err)
+		wallet = &Wallet{}
+		return
+	}
+	wlt := Wallet{}
+	if err = json.NewDecoder(bytes.NewBuffer(walletBytes)).Decode(&wlt); err != nil {
+		logError(fmt.Sprintf("Unable to decode json %s", string(walletBytes)), err)
+		wallet = &Wallet{}
+		return
+	}
+	wallet = &wlt
 }
