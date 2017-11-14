@@ -19,6 +19,7 @@ type Wallet struct {
 type Identity struct {
 	Name    string
 	Private string
+	Public  string
 	Address string
 }
 

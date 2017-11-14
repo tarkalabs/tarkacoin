@@ -4,9 +4,12 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/pem"
+	"errors"
 )
 
 func CreateKey(name string) Identity {
@@ -18,26 +21,30 @@ func CreateKey(name string) Identity {
 	if err != nil {
 		panic(err)
 	}
-
 	privateBlock := &pem.Block{Type: "PRIVATE KEY", Bytes: derKey}
 	privateKey := pem.EncodeToMemory(privateBlock)
 
-	address := hex.EncodeToString(derKey)
+	pubBytes := elliptic.Marshal(key.PublicKey.Curve, key.PublicKey.X, key.PublicKey.Y)
+	pubAddress := hex.EncodeToString(pubBytes)
+	address, err := EncodeAddress(key.PublicKey)
+	if err != nil {
+		panic(err)
+	}
 
-	return Identity{Name: name, Private: string(privateKey), Address: address}
+	return Identity{Name: name, Private: string(privateKey), Address: address, Public: pubAddress}
 }
 
-func ParsePublicAddress(address string) (*ecdsa.PublicKey, error) {
-	der, err := hex.DecodeString(address)
+// ParsePublicKey parses a hex encoded public key into a ECDSA public key
+func ParsePublicKey(publicKey string) (*ecdsa.PublicKey, error) {
+	pubBytes, err := hex.DecodeString(publicKey)
 	if err != nil {
 		return nil, err
 	}
-	pub, err := x509.ParsePKIXPublicKey(der)
-	if err != nil {
-		return nil, err
+	x, y := elliptic.Unmarshal(elliptic.P256(), pubBytes)
+	if x == nil {
+		return nil, errors.New("invalid public key")
 	}
-	publicKey := pub.(ecdsa.PublicKey)
-	return &publicKey, nil
+	return &ecdsa.PublicKey{elliptic.P256(), x, y}, nil
 }
 
 func ParsePrivateKey(privKey string) (*ecdsa.PrivateKey, error) {
@@ -47,6 +54,19 @@ func ParsePrivateKey(privKey string) (*ecdsa.PrivateKey, error) {
 		return nil, err
 	}
 	return pkey, nil
+}
+
+func EncodeAddress(pubKey ecdsa.PublicKey) (string, error) {
+	pubBytes := elliptic.Marshal(elliptic.P256(), pubKey.X, pubKey.Y)
+	hash1 := sha256.New()
+	hash2 := sha256.New()
+	if _, err := hash1.Write(pubBytes); err != nil {
+		return "", err
+	}
+	if _, err := hash2.Write(hash1.Sum(nil)); err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(hash2.Sum(nil)), nil
 }
 
 func SaveKey(keyName string) error {
