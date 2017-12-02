@@ -7,56 +7,25 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/pem"
-	"errors"
 )
 
 func CreateKey(name string) Identity {
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		panic(err)
-	}
-	derKey, err := x509.MarshalECPrivateKey(key)
-	if err != nil {
-		panic(err)
-	}
-	privateBlock := &pem.Block{Type: "PRIVATE KEY", Bytes: derKey}
-	privateKey := pem.EncodeToMemory(privateBlock)
+	privateKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	publicKey := &privateKey.PublicKey
 
-	pubBytes := elliptic.Marshal(key.PublicKey.Curve, key.PublicKey.X, key.PublicKey.Y)
-	pubAddress := hex.EncodeToString(pubBytes)
-	address, err := EncodeAddress(key.PublicKey)
-	if err != nil {
-		panic(err)
-	}
+	x509Encoded, _ := x509.MarshalECPrivateKey(privateKey)
+	x509EncodedPub, _ := x509.MarshalPKIXPublicKey(publicKey)
 
-	return Identity{Name: name, Private: string(privateKey), Address: address, Public: pubAddress}
+	pemEncoded := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: x509Encoded})
+	pemEncodedPub := pem.EncodeToMemory(&pem.Block{Type: "EC PUBLIC KEY", Bytes: x509EncodedPub})
+
+	walletAddress, _ := EncodeAddress(publicKey)
+
+	return Identity{Name: name, Private: string(pemEncoded), Address: walletAddress, Public: string(pemEncodedPub)}
 }
 
-// ParsePublicKey parses a hex encoded public key into a ECDSA public key
-func ParsePublicKey(publicKey string) (*ecdsa.PublicKey, error) {
-	pubBytes, err := hex.DecodeString(publicKey)
-	if err != nil {
-		return nil, err
-	}
-	x, y := elliptic.Unmarshal(elliptic.P256(), pubBytes)
-	if x == nil {
-		return nil, errors.New("invalid public key")
-	}
-	return &ecdsa.PublicKey{elliptic.P256(), x, y}, nil
-}
-
-func ParsePrivateKey(privKey string) (*ecdsa.PrivateKey, error) {
-	block, _ := pem.Decode([]byte(privKey))
-	pkey, err := x509.ParseECPrivateKey(block.Bytes)
-	if err != nil {
-		return nil, err
-	}
-	return pkey, nil
-}
-
-func EncodeAddress(pubKey ecdsa.PublicKey) (string, error) {
+func EncodeAddress(pubKey *ecdsa.PublicKey) (string, error) {
 	pubBytes := elliptic.Marshal(elliptic.P256(), pubKey.X, pubKey.Y)
 	hash1 := sha256.New()
 	hash2 := sha256.New()
